@@ -252,6 +252,7 @@ int Link::write(){
 	while((want = output->size()) > 0){
 		// test
 		//want = 1;
+        // 这个地方把缓冲区里的data都打到日志里试试
 		int len = ::write(sock, output->data(), want);
 		if(len == -1){
 			if(errno == EINTR){

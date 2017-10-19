@@ -256,6 +256,7 @@ void NetworkServer::serve(){
 		for(int i=0; i<(int)events->size(); i++){
 			const Fdevent *fde = events->at(i);
 			if(fde->data.ptr == serv_link){
+                // 这个地方就是收到一个新的link，给她建立连接
 				Link *link = accept_link();
 				if(link){
 					this->link_count ++;				
@@ -266,20 +267,25 @@ void NetworkServer::serve(){
 					log_debug("accept return NULL");
 				}
 			}else if(fde->data.ptr == this->reader || fde->data.ptr == this->writer){
+                // 这个地方的逻辑就是workerpool里的reader或者writer线程完成了一个job
+                // 就通过管道传给网络服务器，网络服务器收到之后就处理这个result，把它从ready list取出来
 				ProcWorkerPool *worker = (ProcWorkerPool *)fde->data.ptr;
 				ProcJob *job = NULL;
 				if(worker->pop(&job) == 0){
 					log_fatal("reading result from workers error!");
 					exit(0);
 				}
+                // 有点没懂
 				proc_result(job, &ready_list);
 			}else{
+                // 有点没懂，大概就是向link里write；或者是从link里read然后扔到ready list里去
+                // 应该就是和client的两条边，回复response和读请求
 				proc_client_event(fde, &ready_list);
 			}
 		}
 
 		double loop_time_1 = microtime() - loop_stime;
-
+        // 前面处理了：从线程池来的；从客户端来的；去客户端的；接下来要真正处理ready list里的东西
 		for(it = ready_list.begin(); it != ready_list.end(); it ++){
 			Link *link = *it;
 			fdes->del(link->fd());
@@ -307,14 +313,26 @@ void NetworkServer::serve(){
 			ProcJob *job = new ProcJob();
 			job->link = link;
 			job->req = link->last_recv();
+            
+            
+            // 这里就是处理ready list里的任务（请求）啦
+            // this->proc所花的总时间记为proc_job_time
 			int result = this->proc(job);
-			if(result == PROC_THREAD){
+
+
+            // 如果是ping请求，result返回是0
+			if(result == PROC_THREAD){ // PROC_THREAD = 1
 				//
-			}else if(result == PROC_BACKEND){
+			}else if(result == PROC_BACKEND){ // PROC_BACKEND = 100
 				// link_count does not include backend links
 				this->link_count --;
 			}else{
+                
+
+                // 这里的总时间记做proc_result_time
 				proc_result(job, &ready_list_2);
+
+
 			}
 		} // end foreach ready link
 
@@ -437,6 +455,7 @@ int NetworkServer::proc_client_event(const Fdevent *fde, ready_list_t *ready_lis
 }
 
 int NetworkServer::proc(ProcJob *job){
+    // 这个函数的开销记为proc_function_time
 	job->serv = this;
 	job->result = PROC_OK;
 	job->stime = microtime();
@@ -465,6 +484,7 @@ int NetworkServer::proc(ProcJob *job){
 		}
 		
 		if(job->cmd->flags & Command::FLAG_THREAD){
+            // 根据命令的属性，决定在线程池中处理（例如set，get这些请求都是在线程池中处理的）
 			if(job->cmd->flags & Command::FLAG_WRITE){
 				writer->push(job);
 			}else{
@@ -472,18 +492,20 @@ int NetworkServer::proc(ProcJob *job){
 			}
 			return PROC_THREAD;
 		}
-
+        // 直接在当前线程（主线程）处理，比如ping请求就是在主线程处理的
 		proc_t p = job->cmd->proc;
 		job->time_wait = 1000 * (microtime() - job->stime);
 		job->result = (*p)(this, job->link, *req, &job->resp);
 		job->time_proc = 1000 * (microtime() - job->stime) - job->time_wait;
 	}while(0);
-	
+
+    // 这个时间记为link_send_time
 	if(job->link->send(job->resp.resp) == -1){
 		job->result = PROC_ERROR;
 	}else{
 		// try to write socket before it would be added to fdevents
 		// socket is NONBLOCK, so it won't block.
+        // 这个时间记为link_write_time
 		if(job->link->write() < 0){
 			job->result = PROC_ERROR;
 		}
