@@ -1,0 +1,22 @@
+[all]
+files = **.cpp, **.h
+ignore = .git/**, deps/**, **.orig
+use_spaces = False
+
+[all.whitespace]
+use_spaces = False
+bears = SpaceConsistencyBear
+default_actions = *: ApplyPatchAction
+
+[all.links]
+bears = InvalidLinkBear
+
+[all.cpp]
+files = **.cpp, **.h
+language = cpp
+bears = CPPLintBear
+
+[all.php]
+files = **.php
+language = php
+bears = PHPLintBear
